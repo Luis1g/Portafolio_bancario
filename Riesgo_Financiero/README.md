@@ -2,7 +2,7 @@
 
 Un microservicio full-stack diseñado para la consulta de activos financieros, procesamiento de series de tiempo y cálculo de métricas de riesgo institucional. 
 
-Este proyecto demuestra la implementación de una arquitectura limpia separando el motor de cálculo (Backend) de la visualización interactiva (Frontend), aplicando buenas prácticas de desarrollo valoradas en el sector FinTech y bancario.
+Este proyecto demuestra la implementación de una arquitectura limpia separando el motor de cálculo (Backend) de la visualización interactiva (Frontend).
 
 ##  Características Principales
 
