@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard de Riesgo Financiero - Corregido</title>
+    
+    <script src="https://unpkg.com/lightweight-charts@4.1.2/dist/lightweight-charts.standalone.production.js"></script>
+    
+    <style>
+        /* ESTILOS (sin cambios) */
+        :root {
+            --bg-principal: #0f172a;
+            --bg-tarjeta: #1e293b;
+            --texto-blanco: #f8fafc;
+            --texto-mutado: #94a3b8;
+            --verde-banca: #10b981;
+            --rojo-riesgo: #f43f5e;
+            --azul-banco: #3b82f6;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
+        body { background-color: var(--bg-principal); color: var(--texto-blanco); padding: 40px 20px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+        .contenedor { width: 100%; max-width: 900px; }
+        header { margin-bottom: 30px; text-align: center; }
+        header h1 { font-size: 24px; font-weight: 600; }
+        header p { color: var(--texto-mutado); font-size: 14px; margin-top: 5px; }
+        
+        .buscador-caja { background-color: var(--bg-tarjeta); padding: 20px; border-radius: 8px; border: 1px solid #334155; display: flex; gap: 15px; margin-bottom: 25px; }
+        .buscador-caja input { flex: 1; background-color: var(--bg-principal); border: 1px solid #334155; border-radius: 6px; padding: 12px 16px; color: var(--texto-blanco); font-size: 16px; text-transform: uppercase; }
+        .buscador-caja input:focus { outline: none; border-color: var(--azul-banco); }
+        .buscador-caja button { background-color: var(--azul-banco); color: var(--texto-blanco); border: none; border-radius: 6px; padding: 12px 24px; font-size: 15px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        .buscador-caja button:hover { background-color: #2563eb; }
+        
+        .estado-mensaje { text-align: center; padding: 20px; color: var(--texto-mutado); display: none; }
+        .error-alerta { background-color: rgba(244, 63, 94, 0.1); border: 1px solid var(--rojo-riesgo); color: #fda4af; padding: 15px; border-radius: 6px; margin-bottom: 25px; display: none; }
+        
+        .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; display: none; }
+        .tarjeta { background-color: var(--bg-tarjeta); border: 1px solid #334155; border-radius: 8px; padding: 20px; }
+        .tarjeta-completa { grid-column: 1 / -1; }
+        .tarjeta p { font-size: 12px; color: var(--texto-mutado); text-transform: uppercase; letter-spacing: 0.5px; }
+        .tarjeta .valor { font-size: 28px; font-weight: 700; margin-top: 10px; }
+        
+        .color-volatilidad { color: #f59e0b; }
+        .color-drawdown { color: var(--rojo-riesgo); }
+        .badge-moneda { background-color: #334155; padding: 2px 8px; border-radius: 4px; font-size: 11px; color: var(--texto-blanco); margin-left: 10px; }
+
+        .grafica-contenedor {
+            width: 100%;
+            height: 400px;
+            margin-top: 25px;
+            border-radius: 8px;
+            border: 1px solid #334155;
+            overflow: hidden;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="contenedor">
+        <header>
+            <h1>Terminal de Análisis de Riesgo Corporativo</h1>
+            <p>Monitoreo de Activos Financieros y Series de Tiempo v1.2</p>
+        </header>
+
+        <div class="buscador-caja">
+            <input type="text" id="tickerInput" placeholder="Ej: AAPL, TSLA, USDMXN=X, WALMEX.MX" value="AAPL">
+            <button onclick="consultarActivo()">Analizar Activo</button>
+        </div>
+
+        <div id="cargando" class="estado-mensaje">Accediendo al servidor y procesando métricas financieras...</div>
+        <div id="errorAlerta" class="error-alerta"></div>
+
+        <div id="dashboard" class="dashboard-grid">
+            <div class="tarjeta tarjeta-completa">
+                <p>Institución / Activo Seleccionado</p>
+                <div class="valor" id="resNombre">-</div>
+                <span id="resTicker" style="color:var(--azul-banco); font-weight:bold;"></span>
+                <span id="resMoneda" class="badge-moneda"></span>
+            </div>
+            <div class="tarjeta">
+                <p>Precio de Cierre (Último)</p>
+                <div class="valor" id="resPrecio">$-</div>
+            </div>
+            <div class="tarjeta">
+                <p>Volatilidad Anualizada</p>
+                <div class="valor color-volatilidad" id="resVolatilidad">-%</div>
+            </div>
+            <div class="tarjeta">
+                <p>Máximo Drawdown (Peor Caída)</p>
+                <div class="valor color-drawdown" id="resDrawdown">-%</div>
+            </div>
+        </div>
+
+        <div id="graficaSerieTiempo" class="grafica-contenedor"></div>
+    </div>
+
+    <script>
+        // Variables globales para destruir y recrear la gráfica cuando el usuario busque otra acción
+        let chart = null;
+        let lineSeries = null;
+
+        async function consultarActivo() {
+            const ticker = document.getElementById('tickerInput').value.trim();
+            const cargando = document.getElementById('cargando');
+            const errorAlerta = document.getElementById('errorAlerta');
+            const dashboard = document.getElementById('dashboard');
+            const contenedorGrafica = document.getElementById('graficaSerieTiempo');
+
+            if (!ticker) return;
+
+            cargando.style.display = 'block';
+            errorAlerta.style.display = 'none';
+            dashboard.style.display = 'none';
+            contenedorGrafica.style.display = 'none';
+
+            try {
+                const url = `http://127.0.0.1:8000/api/analisis/${ticker}`;
+                const respuesta = await fetch(url);
+
+                if (!respuesta.ok) {
+                    const errorDatos = await respuesta.json();
+                    throw new Error(errorDatos.detail || 'Error desconocido en el servidor.');
+                }
+
+                const datos = await respuesta.json();
+
+                // 1. Llenamos las tarjetas
+                document.getElementById('resNombre').innerText = datos.nombre_empresa;
+                document.getElementById('resTicker').innerText = datos.ticker;
+                document.getElementById('resMoneda').innerText = datos.moneda;
+                document.getElementById('resPrecio').innerText = `$${datos.precio_actual.toLocaleString()}`;
+                document.getElementById('resVolatilidad').innerText = `${datos.metricas_riesgo.volatilidad_anualizada_porcentaje}%`;
+                document.getElementById('resDrawdown').innerText = `${datos.metricas_riesgo.max_drawdown_porcentaje}%`;
+
+                dashboard.style.display = 'grid';
+
+                // 2. LÓGICA DE LA GRÁFICA (TradingView)
+                contenedorGrafica.style.display = 'block';
+
+                // Si ya había una gráfica de una búsqueda anterior, la borramos para no encimar datos
+                if (chart !== null) {
+                    chart.remove();
+                }
+
+                // Creamos la instancia de la gráfica con estilos Dark Mode para que encaje con nuestro diseño
+                chart = LightweightCharts.createChart(contenedorGrafica, {
+                    layout: {
+                        background: { type: 'solid', color: '#1e293b' },
+                        textColor: '#94a3b8',
+                    },
+                    grid: {
+                        vertLines: { color: '#334155' },
+                        horzLines: { color: '#334155' },
+                    },
+                    crosshair: {
+                        mode: LightweightCharts.CrosshairMode.Normal,
+                    },
+                    timeScale: {
+                        borderColor: '#334155',
+                    }
+                });
+
+                // Añadimos una serie de tipo línea (puede ser de velas japonesas cambiando esto)
+                lineSeries = chart.addLineSeries({
+                    color: '#3b82f6', // Azul institucional
+                    lineWidth: 2,
+                });
+
+                // Inyectamos los datos históricos formateados desde nuestro backend Python
+                lineSeries.setData(datos.historico);
+
+                // Ajustamos el zoom automáticamente para que se vea todo el año
+                chart.timeScale().fitContent();
+
+            } catch (error) {
+                errorAlerta.innerText = `[Error de Validación]: ${error.message}`;
+                errorAlerta.style.display = 'block';
+            } finally {
+                cargando.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>
